@@ -1,0 +1,174 @@
+using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using MultiTenantSaaS.Core.Entities;
+using MultiTenantSaaS.Core.Enums;
+using MultiTenantSaaS.Infrastructure.Data;
+using MultiTenantSaaS.Infrastructure.Data.Interceptors;
+using MultiTenantSaaS.Infrastructure.Services;
+using MultiTenantSaaS.Tests.Helpers;
+using Xunit;
+
+namespace MultiTenantSaaS.Tests.IntegrationTests;
+
+public class AuditLoggingTests : IDisposable
+{
+    private readonly ApplicationDbContext _context;
+    private readonly AuditDbContext _auditContext;
+    private readonly ITenantService _tenantService;
+    private readonly IAuditService _auditService;
+    private readonly Guid _tenantId;
+    private readonly Guid _userId;
+
+    public AuditLoggingTests()
+    {
+        _tenantService = new TenantService();
+        _auditContext = TestDbContextFactory.CreateInMemoryAuditContext();
+        _auditService = new AuditService(_auditContext);
+
+        // Create context with audit interceptor
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            .AddInterceptors(new AuditInterceptor(_tenantService, _auditService))
+            .Options;
+
+        _context = new ApplicationDbContext(options, _tenantService);
+
+        var (tenant, user) = TestDbContextFactory.SeedTenantAndUser(_context);
+        _tenantId = tenant.Id;
+        _userId = user.Id;
+
+        _tenantService.SetTenantContext(_tenantId, _userId.ToString());
+    }
+
+    [Fact]
+    public async Task AuditLog_CapturesTaskCreation()
+    {
+        // Arrange
+        var task = new TaskItem
+        {
+            TenantId = _tenantId,
+            Title = "New Task",
+            Description = "Task Description",
+            AssignedToUserId = _userId,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        // Act
+        _context.Tasks.Add(task);
+        await _context.SaveChangesAsync();
+
+        // Assert
+        var auditLogs = await _auditContext.AuditLogs
+            .Where(a => a.EntityName == "TaskItem" && a.Action == AuditAction.Insert)
+            .ToListAsync();
+
+        auditLogs.Should().HaveCount(1);
+        var auditLog = auditLogs.First();
+        auditLog.TenantId.Should().Be(_tenantId);
+        auditLog.PerformedBy.Should().Be(_userId.ToString());
+        auditLog.EntityId.Should().Be(task.Id.ToString());
+    }
+
+    [Fact]
+    public async Task AuditLog_CapturesTaskDeletion()
+    {
+        // Arrange
+        var task = new TaskItem
+        {
+            TenantId = _tenantId,
+            Title = "Task to Delete",
+            Description = "Will be deleted",
+            AssignedToUserId = _userId,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.Tasks.Add(task);
+        await _context.SaveChangesAsync();
+
+        // Clear audit logs from creation
+        _auditContext.AuditLogs.RemoveRange(_auditContext.AuditLogs);
+        await _auditContext.SaveChangesAsync();
+
+        // Act
+        _context.Tasks.Remove(task);
+        await _context.SaveChangesAsync();
+
+        // Assert
+        var auditLogs = await _auditContext.AuditLogs
+            .Where(a => a.EntityName == "TaskItem" && a.Action == AuditAction.Delete)
+            .ToListAsync();
+
+        auditLogs.Should().HaveCount(1);
+        var auditLog = auditLogs.First();
+        auditLog.TenantId.Should().Be(_tenantId);
+        auditLog.EntityId.Should().Be(task.Id.ToString());
+    }
+
+    [Fact]
+    public async Task AuditLog_IncludesUserContext()
+    {
+        // Arrange
+        var specificUserId = Guid.NewGuid();
+        _tenantService.SetTenantContext(_tenantId, specificUserId.ToString());
+
+        var task = new TaskItem
+        {
+            TenantId = _tenantId,
+            Title = "User Context Task",
+            Description = "Testing user context",
+            AssignedToUserId = _userId,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        // Act
+        _context.Tasks.Add(task);
+        await _context.SaveChangesAsync();
+
+        // Assert
+        var auditLog = await _auditContext.AuditLogs
+            .FirstOrDefaultAsync(a => a.EntityName == "TaskItem");
+
+        auditLog.Should().NotBeNull();
+        auditLog!.PerformedBy.Should().Be(specificUserId.ToString());
+        auditLog.TenantId.Should().Be(_tenantId);
+    }
+
+    [Fact]
+    public async Task AuditLog_CapturesMultipleOperations()
+    {
+        // Arrange & Act - Create
+        var task = new TaskItem
+        {
+            TenantId = _tenantId,
+            Title = "Multi-Op Task",
+            Description = "Testing multiple operations",
+            AssignedToUserId = _userId,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.Tasks.Add(task);
+        await _context.SaveChangesAsync();
+
+        // Act - Delete
+        _context.Tasks.Remove(task);
+        await _context.SaveChangesAsync();
+
+        // Assert
+        var auditLogs = await _auditContext.AuditLogs
+            .Where(a => a.EntityName == "TaskItem")
+            .OrderBy(a => a.PerformedAt)
+            .ToListAsync();
+
+        auditLogs.Should().HaveCount(2);
+        auditLogs[0].Action.Should().Be(AuditAction.Insert);
+        auditLogs[1].Action.Should().Be(AuditAction.Delete);
+    }
+
+    public void Dispose()
+    {
+        _context.Database.EnsureDeleted();
+        _context.Dispose();
+        _auditContext.Database.EnsureDeleted();
+        _auditContext.Dispose();
+    }
+}

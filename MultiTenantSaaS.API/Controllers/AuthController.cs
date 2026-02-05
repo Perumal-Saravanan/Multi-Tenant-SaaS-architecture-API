@@ -27,8 +27,8 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request)
     {
-        // Check if email already exists
-        if (await _context.Users.AnyAsync(u => u.Email == request.Email))
+        // Check if email already exists (ignore tenant filters for global uniqueness)
+        if (await _context.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == request.Email))
         {
             return BadRequest("Email already registered");
         }
@@ -84,6 +84,7 @@ public class AuthController : ControllerBase
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
     {
         var user = await _context.Users
+            .IgnoreQueryFilters()
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.Email == request.Email);
