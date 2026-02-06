@@ -1,0 +1,227 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop, F1 ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOCKER_IMAGE_NAME: 'placeholder-user/multitenant-saas-api'
+
+jobs:
+  # ==================== BUILD JOB ====================
+  build:
+    name: Build and Compile
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for SonarCloud
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    - name: Restore dependencies
+      run: dotnet restore MultiTenantSaaS.sln
+
+    - name: Build solution
+      run: dotnet build MultiTenantSaaS.sln --configuration Release --no-restore
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-artifacts
+        path: |
+          **/bin/Release/**
+          **/obj/Release/**
+        retention-days: 1
+
+  # ==================== TEST JOB ====================
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore MultiTenantSaaS.sln
+
+    - name: Run unit tests
+      run: |
+        dotnet test MultiTenantSaaS.Tests/MultiTenantSaaS.Tests.csproj \
+          --configuration Release \
+          --no-restore \
+          --verbosity normal \
+          --logger "trx;LogFileName=test-results.trx" \
+          --collect:"XPlat Code Coverage" \
+          --results-directory ./TestResults
+
+    - name: Publish test results
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: '**/test-results.trx'
+        check_name: 'Test Results'
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: TestResults/**/coverage.cobertura.xml
+        retention-days: 5
+
+  # ==================== SONARCLOUD SCAN (DISABLED) ====================
+  # sonarcloud:
+  #   name: SonarCloud Security Scan
+  #   runs-on: ubuntu-latest
+  #   needs: test
+  #   
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v4
+  #     with:
+  #       fetch-depth: 0
+  #
+  #   - name: Setup .NET
+  #     uses: actions/setup-dotnet@v4
+  #     with:
+  #       dotnet-version: ${{ env.DOTNET_VERSION }}
+  #
+  #   - name: Cache SonarCloud packages
+  #     uses: actions/cache@v4
+  #     with:
+  #       path: ~\.sonar\cache
+  #       key: ${{ runner.os }}-sonar
+  #       restore-keys: ${{ runner.os }}-sonar
+  #
+  #   - name: Install SonarCloud scanner
+  #     run: dotnet tool install --global dotnet-sonarscanner
+  #
+  #   - name: Download coverage reports
+  #     uses: actions/download-artifact@v4
+  #     with:
+  #       name: coverage-report
+  #       path: TestResults
+  #
+  #   - name: Run SonarCloud analysis
+  #     env:
+  #       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       SONAR_TOKEN: 'placeholder_token'
+  #     run: |
+  #       dotnet-sonarscanner begin \
+  #         /k:"multitenant-saas-api" \
+  #         /o:"your-org" \
+  #         /d:sonar.login="placeholder_token" \
+  #         /d:sonar.host.url="https://sonarcloud.io" \
+  #         /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml"
+  #       
+  #       dotnet build MultiTenantSaaS.sln --configuration Release
+  #       
+  #       dotnet-sonarscanner end /d:sonar.login="placeholder_token"
+
+  # ==================== DOCKER BUILD & PUSH (DISABLED) ====================
+  # docker:
+  #   name: Build and Push Docker Image
+  #   runs-on: ubuntu-latest
+  #   needs: [test] # Removed sonarcloud dependency
+  #   if: github.event_name == 'push'
+  #   
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v4
+  #
+  #   - name: Set up Docker Buildx
+  #     uses: docker/setup-buildx-action@v3
+  #
+  #   - name: Log in to Docker Hub
+  #     uses: docker/login-action@v3
+  #     with:
+  #       username: 'placeholder_user'
+  #       password: 'placeholder_password'
+  #
+  #   - name: Extract metadata
+  #     id: meta
+  #     uses: docker/metadata-action@v5
+  #     with:
+  #       images: ${{ env.DOCKER_IMAGE_NAME }}
+  #       tags: |
+  #         type=ref,event=branch
+  #         type=sha,prefix={{branch}}-
+  #         type=raw,value=latest,enable={{is_default_branch}}
+  #
+  #   - name: Build and push Docker image
+  #     uses: docker/build-push-action@v5
+  #     with:
+  #       context: .
+  #       file: ./Dockerfile
+  #       push: false # Changed to false for testing
+  #       tags: ${{ steps.meta.outputs.tags }}
+  #       labels: ${{ steps.meta.outputs.labels }}
+  #       cache-from: type=gha
+  #       cache-to: type=gha,mode=max
+  #       build-args: |
+  #         BUILD_VERSION=${{ github.sha }}
+  #
+  #   - name: Image digest
+  #     run: echo "Image pushed with digest ${{ steps.docker_build.outputs.digest }}"
+
+  # ==================== DEPLOY TO EC2 (DISABLED) ====================
+  # deploy:
+  #   name: Deploy to EC2
+  #   runs-on: ubuntu-latest
+  #   needs: docker
+  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  #   environment:
+  #     name: production
+  #     url: http://placeholder-host
+  #   
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v4
+  #
+  #   - name: Configure AWS credentials
+  #     uses: aws-actions/configure-aws-credentials@v4
+  #     with:
+  #       aws-access-key-id: 'placeholder_key'
+  #       aws-secret-access-key: 'placeholder_secret'
+  #       aws-region: 'us-east-1'
+  #
+  #   - name: Setup SSH key
+  #     run: |
+  #       mkdir -p ~/.ssh
+  #       echo "placeholder_ssh_key" > ~/.ssh/deploy_key
+  #       chmod 600 ~/.ssh/deploy_key
+  #       # ssh-keyscan -H placeholder-host >> ~/.ssh/known_hosts
+  #
+  #   - name: Deploy to EC2
+  #     env:
+  #       HOST: 'placeholder-host'
+  #       USERNAME: 'ubuntu'
+  #       DOCKER_IMAGE: ${{ env.DOCKER_IMAGE_NAME }}:main-${{ github.sha }}
+  #       DB_CONNECTION: 'placeholder_db_connection'
+  #       JWT_SECRET: 'placeholder_jwt_secret'
+  #     run: |
+  #       echo "Deployment simulation..."

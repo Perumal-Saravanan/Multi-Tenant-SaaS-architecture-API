@@ -21,6 +21,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<UserRole> UserRoles { get; set; }
     public DbSet<TaskItem> Tasks { get; set; }
     public DbSet<Category> Categories { get; set; }
+    public DbSet<AuditLog> AuditLogs { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -77,6 +78,16 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<User>().HasIndex(u => u.TenantId);
         modelBuilder.Entity<TaskItem>().HasIndex(t => t.TenantId);
         modelBuilder.Entity<Category>().HasIndex(c => c.TenantId);
+        
+        // Configure indexes for audit log queries
+        modelBuilder.Entity<AuditLog>().HasIndex(a => a.TenantId);
+        modelBuilder.Entity<AuditLog>().HasIndex(a => a.EntityName);
+        modelBuilder.Entity<AuditLog>().HasIndex(a => a.PerformedAt);
+        modelBuilder.Entity<AuditLog>().HasIndex(a => new { a.TenantId, a.EntityName, a.PerformedAt });
+        
+        // Add query filter for AuditLog tenant isolation
+        // Allow access if TenantId is null (system logs) or matches current tenant
+        modelBuilder.Entity<AuditLog>().HasQueryFilter(e => !e.TenantId.HasValue || e.TenantId == _tenantService.GetCurrentTenantId());
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

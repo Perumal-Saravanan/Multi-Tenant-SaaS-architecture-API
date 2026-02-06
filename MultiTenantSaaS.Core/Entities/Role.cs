@@ -1,5 +1,3 @@
-using MultiTenantSaaS.Core.Interfaces;
-
 namespace MultiTenantSaaS.Core.Entities;
 
 public class Role

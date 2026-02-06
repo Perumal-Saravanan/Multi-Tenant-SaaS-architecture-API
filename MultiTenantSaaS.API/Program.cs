@@ -5,9 +5,17 @@ using MultiTenantSaaS.Infrastructure.Data;
 using MultiTenantSaaS.Infrastructure.Data.Interceptors;
 using MultiTenantSaaS.Infrastructure.Middleware;
 using MultiTenantSaaS.Infrastructure.Services;
+using MultiTenantSaaS.Infrastructure.Services.Interfaces;
 using System.Text;
 
+// Configure Log4Net
+var logRepository = log4net.LogManager.GetRepository(System.Reflection.Assembly.GetEntryAssembly());
+log4net.Config.XmlConfigurator.Configure(logRepository, new FileInfo("log4net.config"));
+
 var builder = WebApplication.CreateBuilder(args);
+
+// Add Log4Net provider
+builder.Logging.AddLog4Net();
 
 // Add services to the container
 builder.Services.AddControllers();
@@ -17,6 +25,9 @@ builder.Services.AddSwaggerGen();
 // Register scoped services
 builder.Services.AddScoped<ITenantService, TenantService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<ITaskService, TaskService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<AuditInterceptor>();
 
 // Configure Main Database Context with Audit Interceptor
@@ -25,15 +36,17 @@ builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
     var auditInterceptor = serviceProvider.GetRequiredService<AuditInterceptor>();
     
-    options.UseSqlServer(connectionString)
-           .AddInterceptors(auditInterceptor);
-});
-
-// Configure Audit Database Context (Separate Database)
-builder.Services.AddDbContext<AuditDbContext>(options =>
-{
-    var connectionString = builder.Configuration.GetConnectionString("AuditConnection");
-    options.UseSqlServer(connectionString);
+    options.UseSqlServer(connectionString, sqlOptions =>
+        {
+            sqlOptions.CommandTimeout(30); // 30 second timeout
+            sqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 3,
+                maxRetryDelay: TimeSpan.FromSeconds(5),
+                errorNumbersToAdd: null);
+        })
+           .AddInterceptors(auditInterceptor)
+           .EnableSensitiveDataLogging(builder.Environment.IsDevelopment())
+           .EnableDetailedErrors(builder.Environment.IsDevelopment());
 });
 
 // Configure JWT Authentication
@@ -76,12 +89,8 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.UseCors("AllowAngular");
 

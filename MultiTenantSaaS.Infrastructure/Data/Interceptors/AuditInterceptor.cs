@@ -10,12 +10,10 @@ namespace MultiTenantSaaS.Infrastructure.Data.Interceptors;
 public class AuditInterceptor : SaveChangesInterceptor
 {
     private readonly ITenantService _tenantService;
-    private readonly IAuditService _auditService;
 
-    public AuditInterceptor(ITenantService tenantService, IAuditService auditService)
+    public AuditInterceptor(ITenantService tenantService)
     {
         _tenantService = tenantService;
-        _auditService = auditService;
     }
 
     public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
@@ -43,7 +41,18 @@ public class AuditInterceptor : SaveChangesInterceptor
             if (entry.State != EntityState.Added && entry.State != EntityState.Deleted)
                 continue;
 
-            // Skip auditing the AuditLog entity itself
+            // Determine effective TenantId
+            Guid? effectiveTenantId = tenantId == Guid.Empty ? null : tenantId;
+
+            // If we are creating a new Tenant, use its ID for the audit log
+            if (entry.Entity is Tenant tenant && entry.State == EntityState.Added)
+            {
+                effectiveTenantId = tenant.Id;
+            }
+
+
+            // Skip auditing the AuditLog entity itself to avoid infinite loops if we were saving separately
+            // Even though we are adding to the same context now, it is good practice.
             if (entry.Entity is AuditLog)
                 continue;
 
@@ -70,7 +79,7 @@ public class AuditInterceptor : SaveChangesInterceptor
 
             var auditLog = new AuditLog
             {
-                TenantId = tenantId,
+                TenantId = effectiveTenantId,
                 EntityName = entityName,
                 EntityId = entityId,
                 Action = action,
@@ -84,7 +93,10 @@ public class AuditInterceptor : SaveChangesInterceptor
 
         if (auditEntries.Any())
         {
-            await _auditService.LogAuditsAsync(auditEntries);
+            // Directly add to the context. 
+            // Since we are in the SavingChanges interceptor, these will be part of the current transaction.
+            // IMPORTANT: Do NOT call SaveChangesAsync here, as it would cause infinite recursion.
+            await context.AddRangeAsync(auditEntries);
         }
     }
 

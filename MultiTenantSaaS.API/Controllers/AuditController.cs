@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using MultiTenantSaaS.API.DTOs;
+using MultiTenantSaaS.Core.DTOs;
 using MultiTenantSaaS.Infrastructure.Services;
 
 namespace MultiTenantSaaS.API.Controllers;

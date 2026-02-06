@@ -1,13 +1,15 @@
-namespace MultiTenantSaaS.API.DTOs;
+using System.ComponentModel.DataAnnotations;
+
+namespace MultiTenantSaaS.Core.DTOs;
 
 /// <summary>
 /// Request DTO for creating or updating a task
 /// </summary>
 public record TaskRequest(
-    string Title,
-    string? Description,
+    [Required, MinLength(1), MaxLength(200)] string Title,
+    [MaxLength(1000)] string? Description,
     DateTime? DueDate,
-    int Priority,
+    [Range(1, 5)] int Priority,
     int? CategoryId
 );
 

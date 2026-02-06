@@ -1,10 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using MultiTenantSaaS.API.DTOs;
-using MultiTenantSaaS.Core.Entities;
-using MultiTenantSaaS.Infrastructure.Data;
+using MultiTenantSaaS.Core.DTOs;
 using MultiTenantSaaS.Infrastructure.Services;
+using MultiTenantSaaS.Infrastructure.Services.Interfaces;
 
 namespace MultiTenantSaaS.API.Controllers;
 
@@ -13,101 +11,45 @@ namespace MultiTenantSaaS.API.Controllers;
 [Authorize]
 public class TasksController : ControllerBase
 {
-    private readonly ApplicationDbContext _context;
-    private readonly ITenantService _tenantService;
+    private readonly ITaskService _taskService;
 
-    public TasksController(ApplicationDbContext context, ITenantService tenantService)
+    public TasksController(ITaskService taskService)
     {
-        _context = context;
-        _tenantService = tenantService;
+        _taskService = taskService;
     }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<TaskResponse>>> GetTasks()
     {
-        // Global Query Filter automatically filters by tenant
-        var tasks = await _context.Tasks
-            .Include(t => t.Category)
-            .Include(t => t.AssignedToUser)
-            .Select(t => new TaskResponse(
-                t.Id,
-                t.Title,
-                t.Description,
-                t.IsCompleted,
-                t.DueDate,
-                t.Priority,
-                t.CategoryId,
-                t.Category != null ? t.Category.Name : "",
-                $"{t.AssignedToUser.FirstName} {t.AssignedToUser.LastName}",
-                t.CreatedAt
-            ))
-            .ToListAsync();
-
+        var tasks = await _taskService.GetTasksAsync();
         return Ok(tasks);
     }
 
     [HttpGet("{id}")]
     public async Task<ActionResult<TaskResponse>> GetTask(int id)
     {
-        var task = await _context.Tasks
-            .Include(t => t.Category)
-            .Include(t => t.AssignedToUser)
-            .FirstOrDefaultAsync(t => t.Id == id);
+        var task = await _taskService.GetTaskAsync(id);
 
         if (task == null)
             return NotFound();
 
-        return Ok(new TaskResponse(
-            task.Id,
-            task.Title,
-            task.Description,
-            task.IsCompleted,
-            task.DueDate,
-            task.Priority,
-            task.CategoryId,
-            task.Category?.Name ?? "",
-            $"{task.AssignedToUser.FirstName} {task.AssignedToUser.LastName}",
-            task.CreatedAt
-        ));
+        return Ok(task);
     }
 
     [HttpPost]
     public async Task<ActionResult<TaskResponse>> CreateTask(TaskRequest request)
     {
-        var userId = Guid.Parse(_tenantService.GetCurrentUserId());
-
-        var task = new TaskItem
-        {
-            TenantId = _tenantService.GetCurrentTenantId(),
-            Title = request.Title,
-            Description = request.Description,
-            DueDate = request.DueDate,
-            Priority = request.Priority,
-            CategoryId = request.CategoryId,
-            AssignedToUserId = userId
-        };
-
-        _context.Tasks.Add(task);
-        await _context.SaveChangesAsync();
-
+        var task = await _taskService.CreateTaskAsync(request);
         return CreatedAtAction(nameof(GetTask), new { id = task.Id }, task);
     }
 
     [HttpPut("{id}")]
     public async Task<IActionResult> UpdateTask(int id, TaskRequest request)
     {
-        var task = await _context.Tasks.FindAsync(id);
+        var success = await _taskService.UpdateTaskAsync(id, request);
 
-        if (task == null)
+        if (!success)
             return NotFound();
-
-        task.Title = request.Title;
-        task.Description = request.Description;
-        task.DueDate = request.DueDate;
-        task.Priority = request.Priority;
-        task.CategoryId = request.CategoryId;
-
-        await _context.SaveChangesAsync();
 
         return NoContent();
     }
@@ -115,13 +57,10 @@ public class TasksController : ControllerBase
     [HttpPatch("{id}/complete")]
     public async Task<IActionResult> ToggleComplete(int id)
     {
-        var task = await _context.Tasks.FindAsync(id);
+        var success = await _taskService.ToggleCompleteAsync(id);
 
-        if (task == null)
+        if (!success)
             return NotFound();
-
-        task.IsCompleted = !task.IsCompleted;
-        await _context.SaveChangesAsync();
 
         return NoContent();
     }
@@ -130,13 +69,10 @@ public class TasksController : ControllerBase
     [Authorize(Roles = "Admin,Manager")]
     public async Task<IActionResult> DeleteTask(int id)
     {
-        var task = await _context.Tasks.FindAsync(id);
+        var success = await _taskService.DeleteTaskAsync(id);
 
-        if (task == null)
+        if (!success)
             return NotFound();
-
-        _context.Tasks.Remove(task);
-        await _context.SaveChangesAsync();
 
         return NoContent();
     }

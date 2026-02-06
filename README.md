@@ -15,7 +15,7 @@ Enterprise-grade Multi-Tenant Task Management System built with .NET 8 and Angul
 - Controller and action-level authorization
 
 ### 3. **Comprehensive Audit Logging**
-- Separate database for audit trail
+- Integrated audit trail within the main database
 - Automatic tracking of INSERT and DELETE operations
 - EF Core interceptor captures all changes
 - JSON change tracking with user context
@@ -25,15 +25,16 @@ Enterprise-grade Multi-Tenant Task Management System built with .NET 8 and Angul
 - **Infrastructure Layer**: Data access, services, middleware
 - **API Layer**: Controllers, DTOs, configuration
 
-### 5. **Dual Database Architecture**
-- Main database: Application data with tenant isolation
-- Audit database: Compliance and security tracking
+### 5. **Single Database Architecture**
+- Unified database for Application data and Audit logs
+- Simplified deployment and maintenance
+- Transactional consistency between operations and audits
 
 ## 🏗️ Technology Stack
 
 - **Backend**: .NET 8 Web API
 - **Frontend**: Angular 17+ with Signals (to be created)
-- **Database**: SQL Server (dual databases)
+- **Database**: SQL Server
 - **Authentication**: JWT Bearer tokens
 - **ORM**: Entity Framework Core 8
 - **API Documentation**: Swagger/OpenAPI
@@ -48,18 +49,14 @@ Enterprise-grade Multi-Tenant Task Management System built with .NET 8 and Angul
 - Node.js 18+ (for Angular frontend)
 - Angular CLI 17+
 
-### 1. Setup Databases
+### 1. Setup Database
 
 ```powershell
-# Create migrations
-dotnet ef migrations add InitialCreate --project MultiTenantSaaS.Infrastructure --startup-project MultiTenantSaaS.API --context ApplicationDbContext --output-dir Migrations/Main
-
-dotnet ef migrations add InitialAudit --project MultiTenantSaaS.Infrastructure --startup-project MultiTenantSaaS.API --context AuditDbContext --output-dir Migrations/Audit
+# Create migration
+dotnet ef migrations add InitialCreate --project MultiTenantSaaS.Infrastructure --startup-project MultiTenantSaaS.API --context ApplicationDbContext --output-dir Migrations
 
 # Apply migrations
 dotnet ef database update --project MultiTenantSaaS.Infrastructure --startup-project MultiTenantSaaS.API --context ApplicationDbContext
-
-dotnet ef database update --project MultiTenantSaaS.Infrastructure --startup-project MultiTenantSaaS.API --context AuditDbContext
 ```
 
 ### 2. Run Backend
@@ -112,9 +109,104 @@ public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(...)
 - [Walkthrough](walkthrough.md) - Complete implementation walkthrough
 - [API Documentation](https://localhost:7001/swagger) - Interactive API docs
 
-## 🐳 Docker Support
+## 🐳 Docker & CI/CD
 
-Docker configuration files will be added to run the entire stack:
-- SQL Server (main + audit databases)
-- .NET 8 API
-- Angular frontend
+### Local Development with Docker
+
+Run the complete stack locally with Docker Compose:
+
+```bash
+# Build and start all services
+docker-compose up --build
+
+# API will be available at http://localhost:8080
+# SQL Server at localhost:1433
+```
+
+### Building Docker Image Manually
+
+```bash
+# Build the image
+docker build -t multitenant-saas-api:latest .
+
+# Run the container
+docker run -d -p 8080:8080 \
+  -e ConnectionStrings__DefaultConnection="your-connection-string" \
+  -e Jwt__Secret="your-secret-key" \
+  multitenant-saas-api:latest
+```
+
+### GitHub Actions CI/CD Pipeline
+
+The project includes a complete CI/CD pipeline (`.github/workflows/ci-cd.yml`) with:
+
+**Build Stage**: 
+- .NET 8 SDK setup
+- Dependency restoration with caching
+- Solution build
+
+**Test Stage**:
+- Automated unit tests
+- Code coverage reports
+- Test result publishing
+
+**Security Scan**: 
+- SonarCloud static code analysis
+- Security vulnerability scanning
+- Code quality metrics
+
+**Docker Stage**:
+- Multi-stage Docker build
+- Push to Docker Hub
+- Image tagging with commit SHA
+
+**Deploy Stage** (main branch only):
+- Automated deployment to AWS EC2
+- Zero-downtime deployment with health checks
+- Automatic rollback on failure
+
+#### Required GitHub Secrets
+
+Configure these secrets in your GitHub repository:
+
+```
+AWS_ACCESS_KEY_ID          # AWS credentials for EC2
+AWS_SECRET_ACCESS_KEY      # AWS secret key
+AWS_REGION                 # AWS region (e.g., us-east-1)
+EC2_HOST                   # EC2 instance public IP
+EC2_USERNAME               # SSH username (e.g., ubuntu)
+EC2_SSH_KEY                # Private SSH key for EC2 access
+DOCKER_USERNAME            # Docker Hub username
+DOCKER_PASSWORD            # Docker Hub password/token
+SONAR_TOKEN                # SonarCloud token
+DB_CONNECTION_STRING       # Production DB connection
+JWT_SECRET                 # Production JWT secret key
+```
+
+#### SonarCloud Setup
+
+1. Sign up at [SonarCloud.io](https://sonarcloud.io) (free for public repos)
+2. Create a new project and get your token
+3. Update `sonarcloud.properties` with your organization name
+4. Add `SONAR_TOKEN` to GitHub Secrets
+
+### Health Check Endpoint
+
+Monitor application health:
+
+```bash
+curl http://localhost:8080/api/health
+```
+
+Response:
+```json
+{
+  "status": "Healthy",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "service": "Multi-Tenant SaaS API",
+  "version": "1.0.0",
+  "checks": {
+    "database": "Healthy",
+  }
+}
+```

@@ -12,7 +12,7 @@ namespace MultiTenantSaaS.Tests.UnitTests.Controllers;
 
 public class AuditControllerTests : IDisposable
 {
-    private readonly AuditDbContext _auditContext;
+    private readonly ApplicationDbContext _context;
     private readonly IAuditService _auditService;
     private readonly ITenantService _tenantService;
     private readonly AuditController _controller;
@@ -20,9 +20,9 @@ public class AuditControllerTests : IDisposable
 
     public AuditControllerTests()
     {
-        _auditContext = TestDbContextFactory.CreateInMemoryAuditContext();
         _tenantService = new TenantService();
-        _auditService = new AuditService(_auditContext);
+        _context = TestDbContextFactory.CreateInMemoryContext(_tenantService);
+        _auditService = new AuditService(_context);
 
         _tenantId = Guid.NewGuid();
         _tenantService.SetTenantContext(_tenantId, "test-user-id");
@@ -36,7 +36,7 @@ public class AuditControllerTests : IDisposable
         // Arrange
         for (int i = 0; i < 15; i++)
         {
-            _auditContext.AuditLogs.Add(new AuditLog
+            _context.AuditLogs.Add(new AuditLog
             {
                 TenantId = _tenantId,
                 EntityName = "TaskItem",
@@ -47,7 +47,7 @@ public class AuditControllerTests : IDisposable
                 Changes = "{}"
             });
         }
-        await _auditContext.SaveChangesAsync();
+        await _context.SaveChangesAsync();
 
         // Act
         var result = await _controller.GetAuditLogs(pageNumber: 1, pageSize: 10);
@@ -64,7 +64,7 @@ public class AuditControllerTests : IDisposable
     public async Task GetAuditLogs_FiltersByTenant()
     {
         // Arrange
-        _auditContext.AuditLogs.Add(new AuditLog
+        _context.AuditLogs.Add(new AuditLog
         {
             TenantId = _tenantId,
             EntityName = "TaskItem",
@@ -76,7 +76,7 @@ public class AuditControllerTests : IDisposable
         });
 
         var otherTenantId = Guid.NewGuid();
-        _auditContext.AuditLogs.Add(new AuditLog
+        _context.AuditLogs.Add(new AuditLog
         {
             TenantId = otherTenantId,
             EntityName = "TaskItem",
@@ -87,7 +87,7 @@ public class AuditControllerTests : IDisposable
             Changes = "{}"
         });
 
-        await _auditContext.SaveChangesAsync();
+        await _context.SaveChangesAsync();
 
         // Act
         var result = await _controller.GetAuditLogs(pageNumber: 1, pageSize: 50);
@@ -97,13 +97,13 @@ public class AuditControllerTests : IDisposable
         var okResult = result.Result as OkObjectResult;
         
         // The controller should only return logs for the current tenant
-        var logs = _auditContext.AuditLogs.Where(l => l.TenantId == _tenantId).ToList();
+        var logs = _context.AuditLogs.Where(l => l.TenantId == _tenantId).ToList();
         logs.Should().HaveCount(1);
     }
 
     public void Dispose()
     {
-        _auditContext.Database.EnsureDeleted();
-        _auditContext.Dispose();
+        _context.Database.EnsureDeleted();
+        _context.Dispose();
     }
 }

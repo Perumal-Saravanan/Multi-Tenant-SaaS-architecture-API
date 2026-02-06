@@ -10,13 +10,15 @@ namespace MultiTenantSaaS.Tests.UnitTests.Services;
 
 public class AuditServiceTests : IDisposable
 {
-    private readonly AuditDbContext _auditContext;
+    private readonly ApplicationDbContext _context;
     private readonly IAuditService _auditService;
+    private readonly ITenantService _tenantService;
 
     public AuditServiceTests()
     {
-        _auditContext = TestDbContextFactory.CreateInMemoryAuditContext();
-        _auditService = new AuditService(_auditContext);
+        _tenantService = new TenantService();
+        _context = TestDbContextFactory.CreateInMemoryContext(_tenantService);
+        _auditService = new AuditService(_context);
     }
 
     [Fact]
@@ -40,9 +42,12 @@ public class AuditServiceTests : IDisposable
 
         // Act
         await _auditService.LogAuditsAsync(auditLogs);
+        
+        // Set tenant context to query the audit logs
+        _tenantService.SetTenantContext(tenantId, "test-user-id");
 
         // Assert
-        var savedLog = _auditContext.AuditLogs.FirstOrDefault();
+        var savedLog = _context.AuditLogs.FirstOrDefault();
         savedLog.Should().NotBeNull();
         savedLog!.TenantId.Should().Be(tenantId);
         savedLog.EntityName.Should().Be("TaskItem");
@@ -81,9 +86,12 @@ public class AuditServiceTests : IDisposable
 
         // Act
         await _auditService.LogAuditsAsync(auditLogs);
+        
+        // Set tenant context to query the audit logs
+        _tenantService.SetTenantContext(tenantId, "user-1");
 
         // Assert
-        var savedLogs = _auditContext.AuditLogs.ToList();
+        var savedLogs = _context.AuditLogs.ToList();
         savedLogs.Should().HaveCount(2);
     }
 
@@ -154,7 +162,7 @@ public class AuditServiceTests : IDisposable
 
     public void Dispose()
     {
-        _auditContext.Database.EnsureDeleted();
-        _auditContext.Dispose();
+        _context.Database.EnsureDeleted();
+        _context.Dispose();
     }
 }

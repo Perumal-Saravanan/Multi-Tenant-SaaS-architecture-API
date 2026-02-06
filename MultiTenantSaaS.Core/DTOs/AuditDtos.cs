@@ -1,4 +1,4 @@
-namespace MultiTenantSaaS.API.DTOs;
+namespace MultiTenantSaaS.Core.DTOs;
 
 /// <summary>
 /// Response DTO for audit log entries

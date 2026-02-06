@@ -2,10 +2,11 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MultiTenantSaaS.API.Controllers;
-using MultiTenantSaaS.API.DTOs;
+using MultiTenantSaaS.Core.DTOs;
 using MultiTenantSaaS.Core.Entities;
 using MultiTenantSaaS.Infrastructure.Data;
 using MultiTenantSaaS.Infrastructure.Services;
+using MultiTenantSaaS.Infrastructure.Services.Interfaces;
 using MultiTenantSaaS.Tests.Helpers;
 using Xunit;
 
@@ -30,7 +31,8 @@ public class TasksControllerTests : IDisposable
 
         _tenantService.SetTenantContext(_tenantId, _userId.ToString());
 
-        _controller = new TasksController(_context, _tenantService);
+        var taskService = new TaskService(_context, _tenantService);
+        _controller = new TasksController(taskService);
     }
 
     [Fact]
@@ -57,6 +59,9 @@ public class TasksControllerTests : IDisposable
             "OTHER"
         );
 
+        // Set tenant context to other tenant to create the task
+        _tenantService.SetTenantContext(otherTenant.Id, otherUser.Id.ToString());
+        
         var otherTask = new TaskItem
         {
             TenantId = otherTenant.Id,
@@ -68,6 +73,9 @@ public class TasksControllerTests : IDisposable
 
         _context.Tasks.Add(otherTask);
         await _context.SaveChangesAsync();
+
+        // Reset tenant context back to original tenant for the test
+        _tenantService.SetTenantContext(_tenantId, _userId.ToString());
 
         // Act
         var result = await _controller.GetTasks();
@@ -86,7 +94,7 @@ public class TasksControllerTests : IDisposable
     public async Task CreateTask_AssignsTenantIdAutomatically()
     {
         // Arrange
-        var request = new TaskRequest(
+        var request = new MultiTenantSaaS.Core.DTOs.TaskRequest(
             Title: "New Task",
             Description: "New Description",
             DueDate: DateTime.UtcNow.AddDays(7),
@@ -122,7 +130,7 @@ public class TasksControllerTests : IDisposable
         _context.Tasks.Add(task);
         await _context.SaveChangesAsync();
 
-        var updateRequest = new TaskRequest(
+        var updateRequest = new MultiTenantSaaS.Core.DTOs.TaskRequest(
             Title: "Updated Title",
             Description: "Updated Description",
             DueDate: DateTime.UtcNow.AddDays(10),

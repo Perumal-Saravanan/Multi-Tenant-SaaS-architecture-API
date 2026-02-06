@@ -22,15 +22,6 @@ public static class TestDbContextFactory
         return context;
     }
 
-    public static AuditDbContext CreateInMemoryAuditContext()
-    {
-        var options = new DbContextOptionsBuilder<AuditDbContext>()
-            .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
-            .Options;
-
-        return new AuditDbContext(options);
-    }
-
     private static void SeedDefaultData(ApplicationDbContext context)
     {
         // Seed roles if not already present

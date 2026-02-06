@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using MultiTenantSaaS.Core.Entities;
 using MultiTenantSaaS.Infrastructure.Data;
 
@@ -11,29 +12,28 @@ public interface IAuditService
 
 public class AuditService : IAuditService
 {
-    private readonly AuditDbContext _auditDbContext;
+    private readonly ApplicationDbContext _context;
 
-    public AuditService(AuditDbContext auditDbContext)
+    public AuditService(ApplicationDbContext context)
     {
-        _auditDbContext = auditDbContext;
+        _context = context;
     }
 
     public async Task LogAuditsAsync(IEnumerable<AuditLog> auditLogs)
     {
-        await _auditDbContext.AuditLogs.AddRangeAsync(auditLogs);
-        await _auditDbContext.SaveChangesAsync();
+        await _context.AuditLogs.AddRangeAsync(auditLogs);
+        await _context.SaveChangesAsync();
     }
 
     public async Task<IEnumerable<AuditLog>> GetAuditLogsAsync(Guid tenantId, int pageNumber = 1, int pageSize = 50)
     {
-        return await Task.Run(() =>
-        {
-            return _auditDbContext.AuditLogs
-                .Where(a => a.TenantId == tenantId)
-                .OrderByDescending(a => a.PerformedAt)
-                .Skip((pageNumber - 1) * pageSize)
-                .Take(pageSize)
-                .ToList();
-        });
+        return await _context.AuditLogs
+            .AsNoTracking() // Read-only query optimization
+            .IgnoreQueryFilters() // Bypass global tenant filter since we explicitly filter by tenantId parameter
+            .Where(a => a.TenantId == tenantId)
+            .OrderByDescending(a => a.PerformedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
     }
 }

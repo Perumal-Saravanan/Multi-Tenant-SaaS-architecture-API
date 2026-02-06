@@ -2,12 +2,15 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using MultiTenantSaaS.API.Controllers;
-using MultiTenantSaaS.API.DTOs;
+using MultiTenantSaaS.Core.DTOs;
 using MultiTenantSaaS.Infrastructure.Data;
 using MultiTenantSaaS.Infrastructure.Services;
+using MultiTenantSaaS.Infrastructure.Services.Interfaces;
 using MultiTenantSaaS.Tests.Helpers;
 using Xunit;
+using Moq;
 
 namespace MultiTenantSaaS.Tests.UnitTests.Controllers;
 
@@ -15,6 +18,7 @@ public class AuthControllerTests : IDisposable
 {
     private readonly ApplicationDbContext _context;
     private readonly AuthController _controller;
+    private readonly IJwtTokenService _jwtTokenService;
     private readonly IConfiguration _configuration;
     private readonly ITenantService _tenantService;
 
@@ -34,7 +38,12 @@ public class AuthControllerTests : IDisposable
             .AddInMemoryCollection(inMemorySettings!)
             .Build();
 
-        _controller = new AuthController(_context, _configuration);
+        _jwtTokenService = new JwtTokenService(_configuration);
+        var authService = new AuthService(_context, _jwtTokenService);
+        
+        // Create a mock logger
+        var mockLogger = new Mock<ILogger<AuthController>>();
+        _controller = new AuthController(authService, mockLogger.Object);
     }
 
     [Fact]
@@ -112,6 +121,13 @@ public class AuthControllerTests : IDisposable
 
         await _controller.Register(registerRequest);
 
+        // Get the tenant that was created during registration
+        var tenant = _context.Tenants.IgnoreQueryFilters().FirstOrDefault(t => t.CompanyCode == "LOGIN");
+        tenant.Should().NotBeNull();
+        
+        // Set tenant context before login
+        _tenantService.SetTenantContext(tenant!.Id, string.Empty);
+
         var loginRequest = new LoginRequest(
             Email: "login@company.com",
             Password: "Password123!"
@@ -145,6 +161,13 @@ public class AuthControllerTests : IDisposable
 
         await _controller.Register(registerRequest);
 
+        // Get the tenant that was created during registration
+        var tenant = _context.Tenants.IgnoreQueryFilters().FirstOrDefault(t => t.CompanyCode == "VALID");
+        tenant.Should().NotBeNull();
+        
+        // Set tenant context before login
+        _tenantService.SetTenantContext(tenant!.Id, string.Empty);
+
         var loginRequest = new LoginRequest(
             Email: "valid@company.com",
             Password: "WrongPassword123!"
@@ -156,7 +179,7 @@ public class AuthControllerTests : IDisposable
         // Assert
         result.Result.Should().BeOfType<UnauthorizedObjectResult>();
         var unauthorized = result.Result as UnauthorizedObjectResult;
-        unauthorized!.Value.Should().Be("Invalid credentials");
+        unauthorized!.Value.Should().Be("Invalid credentials or account is inactive");
     }
 
     [Fact]

@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # SQL Server for Main Database
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: multitenant-sqlserver
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong@Passw0rd
+      - MSSQL_PID=Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    networks:
+      - multitenant-network
+    healthcheck:
+      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P YourStrong@Passw0rd -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Multi-Tenant SaaS API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+    container_name: multitenant-api
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=MultiTenantSaaS;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True
+      - Jwt__Secret=YourSuperSecretKeyForJWTTokenGeneration12345!
+      - Jwt__Issuer=MultiTenantSaaSAPI
+      - Jwt__Audience=MultiTenantSaaSClient
+    ports:
+      - "8080:8080"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    networks:
+      - multitenant-network
+    restart: unless-stopped
+    healthcheck:
+      test: curl -f http://localhost:8080/api/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  multitenant-network:
+    driver: bridge
+
+volumes:
+  sqlserver-data:
